@@ -1,0 +1,17 @@
+﻿  Source.c
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(176,71): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(208,47): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(221,61): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(323,35): warning C4267: '=': conversion from 'size_t' to 'int', possible loss of data
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(342,78): warning C4244: '=': conversion from 'ULONGLONG' to 'int', possible loss of data
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(314,59): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(351,43): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(450,60): warning C4133: 'function': incompatible types - from 'WIN32_FIND_DATA *' to 'LPWIN32_FIND_DATAA'
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(513,56): warning C4047: 'function': 'char *' differs in levels of indirection from 'char (*)[200]'
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(513,41): warning C4024: 'GetFilesInFolder': different types for formal and actual parameter 2
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(533,44): warning C4090: 'function': different 'const' qualifiers
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(535,9): warning C4033: 'CreateFileUpdatePackage' must return a value
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(572): warning C4715: 'CreateFileUpdatePackage': not all control paths return a value
+  C FileServer.vcxproj -> C:\Users\Klauke\source\repos\C FileServer\x64\Debug\C FileServer.exe
+  Der Befehl "pwsh.exe" ist entweder falsch geschrieben oder
+  konnte nicht gefunden werden.
