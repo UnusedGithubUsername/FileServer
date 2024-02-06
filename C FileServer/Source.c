@@ -20,7 +20,7 @@
 //structs 
 typedef union {
     struct {
-        int package_size; 
+        int package_size;
         int package_number;
         int file_guid;//  
         char file_data[BUFFER_SIZE - 12];
@@ -44,7 +44,7 @@ typedef struct FileList {
 
 typedef struct FileListNode {
     struct FileListNode* Next;
-    char* FileName;
+    int FileName;
 }FileListNode;
 
 typedef struct ActivelySentFile {
@@ -59,17 +59,18 @@ typedef struct ActivelySentFile {
     FileListNode* Last;
 }ActivelySentFile;
 
-
 //functions
 char* CreateFileUpdatePackage(int* bufferPosition);
 void GetFilesInFolder(FileList* FileList, char* BasePath);
 void BindSocket(SOCKET* socket);
 void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 
+void DisconnectClient(int index_of_socket);
+
 //global variables
-const char* BaseFolderPath  = "C:\\Users\\Klauke\\Documents\\My Games\\Corivi\\LauncherServer\\*.*";
+const char* BaseFolderPath = "C:\\Users\\Klauke\\Documents\\My Games\\Corivi\\LauncherServer\\*.*";
 const char* BaseFolderPath2 = "F:\\Programme\\Heroes3 + Heroes3HotA\\Heroes 3 - HotA\\*.*";
- 
+
 DataUnion sending_data_buffer;
 int filecount = 0;
 FileToDistribute* server_files;
@@ -77,23 +78,18 @@ HANDLE hMutex;
 
 SOCKET client_sockets[MAX_CLIENTS] = { 0 };
 ActivelySentFile files_currently_sent[MAX_CLIENTS] = { 0 };
-//TODO. when disconnect, free and reset this array at the correct position
+
 
 int num_of_files_sent = 1; //a guid, so that the client notices when the file he recieves switches
 
-//options
-
-
 int main() {
-     
+
     // Create a socket
     SOCKET server_socket;
     BindSocket(&server_socket);
 
     int file_updatepackage_length = 0;
     char* current_file_update = CreateFileUpdatePackage(&file_updatepackage_length);
-
-
 
     //now declare a different thread that sends long files over time
     TIMECAPS timeCaps;
@@ -137,7 +133,6 @@ int main() {
         //select modifies the readfds and removes every socket that can NOT be read from because no data is available
         int activity_count = select(0, &readfds, NULL, NULL, NULL);//check which sockets have data to read
         WaitForSingleObject(hMutex, INFINITE);
-        //Sleep(111);
         //now accept new connections if available
         bool server_data_available = readfds.fd_array[0] == server_socket; //if select did not remove the socket, it is active
         if (server_data_available && connection_count < MAX_CLIENTS) {//accept only if we dont handle way to many cons already
@@ -179,22 +174,8 @@ int main() {
             if (attempted_values_read < 4) { //valread 0 is dc, valread -1 is an error // we never need to handle a "too much data error" because this server only expects requests to retrieve files. Errors need to instantly disconnect
 
                 printf("Client disconnected \n");
-                closesocket(skt);
 
-                client_sockets[index_of_socket] = 0;// mark socket spot as unused
-                if (files_currently_sent[index_of_socket].stream_isActive)
-                {
-                    free(files_currently_sent[index_of_socket].filebytes);
-                    files_currently_sent[index_of_socket].stream_isActive = 0;
-                }
-                while (files_currently_sent[index_of_socket].First != NULL) { //free() the list of files we are sending
-                    printf("    %s \n", (files_currently_sent[index_of_socket].First->FileName));
-                    FileListNode* next = files_currently_sent[index_of_socket].First->Next;
-                    free(files_currently_sent[index_of_socket].First->FileName);
-                    free(files_currently_sent[index_of_socket].First);
-                    files_currently_sent[index_of_socket].First = next;
-                }
-                files_currently_sent[index_of_socket].Last = NULL;
+                DisconnectClient(index_of_socket);
                 continue;
             }
 
@@ -210,7 +191,7 @@ int main() {
                 break;
             }
             case(2)://client requests a certain number of files
-            {                
+            {
                 int bytecount_package;
                 memcpy(&bytecount_package, &sending_data_buffer.raw_data[4], 4);
                 if (attempted_values_read < bytecount_package)
@@ -226,30 +207,28 @@ int main() {
                 printf("num of file %d\n", number_of_files_requested);
                 int buffer_position = 12;
 
-                //assert(list == NULL);
-
                 for (int i = 0; i < number_of_files_requested; i++)
                 {
-                     
+                    //int fileArray[number_of_files_requested] = { 0 };
                     int filename_length;
-
-                    
                     memcpy(&filename_length, &sending_data_buffer.raw_data[buffer_position], 4);
                     buffer_position += 4;
+
                     if (filename_length < 0) {
-                        int error = 11111;
                         break;
                     }
+
                     FileListNode* file_node = malloc(sizeof(struct FileListNode));
                     assert(file_node != NULL);
-                    file_node->FileName = malloc(filename_length + 1);
-                    assert(file_node->FileName != NULL);
+                    //file_node->FileName = malloc(filename_length + 1);
+                    //assert(file_node->FileName != NULL);
                     file_node->Next = NULL;
 
-                    memcpy(&(file_node->FileName[0]), &sending_data_buffer.raw_data[buffer_position], filename_length);
-                    buffer_position += filename_length;
-                    file_node->FileName[filename_length] = 0;
+                    //memcpy(&(file_node->FileName[0]), &sending_data_buffer.raw_data[buffer_position], filename_length);
+                    //buffer_position += filename_length;
+                    //file_node->FileName[filename_length] = 0;
 
+                    file_node->FileName = filename_length;
                     if (files_currently_sent[index_of_socket].Last == NULL)//if first and last are 0 we are adding the first element
                     {
                         files_currently_sent[index_of_socket].First = file_node;
@@ -261,27 +240,39 @@ int main() {
                         files_currently_sent[index_of_socket].Last = file_node;
                     }
 
-                    printf("    %.*s \n", filename_length, &(file_node->FileName[0]));
+                    //printf("    %.*s \n", filename_length, &(file_node->FileName[0]));
 
                 }
-
-            }
-            break;
-
-            default: 
                 break;
-             
             }
-
-            if (attempted_values_read == 4) {
-
-                continue;
+            default: //if the client sends unexpected data, DC him
+                DisconnectClient(index_of_socket);
+                break;
             }
-
         }
     }
 
     return 0;
+}
+
+void DisconnectClient(int index_of_socket)//Free the memory related to the client (outstanding files) and reset some things
+{
+    closesocket(client_sockets[index_of_socket]);
+
+    client_sockets[index_of_socket] = 0;// mark socket spot as unused
+    if (files_currently_sent[index_of_socket].stream_isActive)//if a file is currently mid sending, free the file
+    {
+        free(files_currently_sent[index_of_socket].filebytes);
+        files_currently_sent[index_of_socket].stream_isActive = 0;
+    }
+    while (files_currently_sent[index_of_socket].First != NULL) { //free() the list of filenames we would have sent
+        //printf("    %s \n", (files_currently_sent[index_of_socket].First->FileName));
+        FileListNode* next = files_currently_sent[index_of_socket].First->Next;
+        //free(files_currently_sent[index_of_socket].First->FileName);
+        free(files_currently_sent[index_of_socket].First);
+        files_currently_sent[index_of_socket].First = next;
+    }
+    files_currently_sent[index_of_socket].Last = NULL;
 }
 
 
@@ -296,39 +287,39 @@ void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw
     int bytes_sent_this_Cycle = 0;
     bool files_remaining = false;
 
-    do {     
+    do {
         for (size_t i = 0; i < MAX_CLIENTS; i++)
         {
             if ((bytes_sent_this_Cycle / MAX_BYTECOUNT_PER_PERIOD) > 0.9f)
                 break;
-             
+
             if (client_sockets[i] == 0 || files_currently_sent[i].First == NULL) //if no reciever or nothing to be recieved
                 continue;
 
-            int buffer_position = 0; 
+            int buffer_position = 0;
             if (files_currently_sent[i].stream_isActive == 0)
             {// we need to send a header
-                int f_index = -1;
-                for (size_t j = 0; j < filecount; j++)
-                {
-                    int fname_len_given_by_client = strlen(files_currently_sent[i].First->FileName);
-                    if (server_files[j].fname_len != fname_len_given_by_client) //if filenames are equally long
-                    {//filenames have diff len, so they are not the same string
-                        continue;
-                    }
+                int f_index = files_currently_sent[i].First->FileName;//-1;
+                //for (size_t j = 0; j < filecount; j++)
+                //{
+                //    int fname_len_given_by_client = strlen(files_currently_sent[i].First->FileName);
+                //    if (server_files[j].fname_len != fname_len_given_by_client) //if filenames are equally long
+                //    {//filenames have diff len, so they are not the same string
+                //        continue;
+                //    }
+                //
+                //    //if strings are equal
+                //    if (0 == memcmp(files_currently_sent[i].First->FileName, server_files[j].rel_path, server_files[j].fname_len))
+                //    {
+                //        f_index = j;
+                //        break;
+                //    }
+                //}
+                //if (f_index == -1) {
+                //    printf("%s\n", "FILE WAS NOT FOUND INSIDE THE FILEARRAY");
+                //    continue;
+                //}
 
-                    //if strings are equal
-                    if (0 == memcmp(files_currently_sent[i].First->FileName, server_files[j].rel_path, server_files[j].fname_len))
-                    {
-                        f_index = j;
-                        break;
-                    }
-                }
-                if (f_index == -1) {
-                    printf("%s\n", "FILE WAS NOT FOUND INSIDE THE FILEARRAY");
-                    continue;
-                }
-                 
                 char full_path[200] = { 0 };// combine the path parts into the full filepath
                 memcpy(&full_path[0], BaseFolderPath, strlen(BaseFolderPath) - 3);
                 memcpy(&full_path[strlen(BaseFolderPath) - 3], server_files[f_index].rel_path, server_files[f_index].fname_len);
@@ -395,7 +386,6 @@ void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw
             int bytes_left = files_currently_sent[i].filebytes_len - files_currently_sent[i].bytes_sent;
             int bytecount_we_send_this_client = MAX_BYTECOUNT < bytes_left ? MAX_BYTECOUNT : bytes_left; // send max number of bytes unless fewer are left to send
 
-
             //now the actual data
             memcpy(&sending_data_buffer.fields.file_data[buffer_position], &files_currently_sent[i].filebytes[files_currently_sent[i].bytes_sent], bytecount_we_send_this_client);
             buffer_position += bytecount_we_send_this_client;
@@ -403,7 +393,6 @@ void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw
             sending_data_buffer.fields.package_size = buffer_position - 4 + 12;// size not including the size int but including 3 fields
             sending_data_buffer.fields.package_number = files_currently_sent[i].packages_send;
             sending_data_buffer.fields.file_guid = files_currently_sent[i].file_id;
-
 
             files_currently_sent[i].packages_send++;
 
@@ -418,7 +407,7 @@ void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw
 
                 FileListNode* finished_file = files_currently_sent[i].First;
                 files_currently_sent[i].First = files_currently_sent[i].First->Next;
-                free(finished_file->FileName);
+                //free(finished_file->FileName);
                 free(finished_file);
                 if (files_currently_sent[i].First == NULL)
                 {
@@ -433,10 +422,9 @@ void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw
             bytes_sent_this_Cycle += bytecount_we_send_this_client;
 
         }
-    } while ((bytes_sent_this_Cycle / MAX_BYTECOUNT_PER_PERIOD) > 0.5f && files_remaining&&false);
+    } while ((bytes_sent_this_Cycle / MAX_BYTECOUNT_PER_PERIOD) > 0.5f && files_remaining && false);
 
     ReleaseMutex(hMutex);
-
 }
 
 void GetFilesInFolder(FileList* File_List, char* BasePath) {
@@ -564,7 +552,7 @@ char* CreateFileUpdatePackage(int* bufferPosition) {
     package_buffer[*bufferPosition] = '\0';
 
     int packagesize_excluding_packagenumber = *bufferPosition - 4;//write packageID and packagesize to the front, 
-    memcpy(&package_buffer[0], &packagesize_excluding_packagenumber, 4); 
+    memcpy(&package_buffer[0], &packagesize_excluding_packagenumber, 4);
 
     printf("%d\n", files.Count);
 
