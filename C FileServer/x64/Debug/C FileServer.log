@@ -1,11 +1,1 @@
-﻿  Source.c
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(65,98): warning C4047: 'function': 'FileToDistribute *' differs in levels of indirection from 'FileToDistribute **'
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(65,85): warning C4024: 'CreateFileUpdatePackage': different types for formal and actual parameter 2
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(144,71): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(160,47): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(171,61): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(267,78): warning C4244: '=': conversion from 'ULONGLONG' to 'int', possible loss of data
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(276,43): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
-  C FileServer.vcxproj -> C:\Users\Klauke\source\repos\C FileServer\x64\Debug\C FileServer.exe
-  Der Befehl "pwsh.exe" ist entweder falsch geschrieben oder
-  konnte nicht gefunden werden.
+﻿

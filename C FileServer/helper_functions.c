@@ -4,10 +4,10 @@
 #include <windows.h>         
 #include "folder_content.h"
 const char* BaseFolderPath = "C:\\Users\\Klauke\\Documents\\My Games\\Corivi\\LauncherServer\\*.*";
-const char* BaseFolderPath2 = "F:\\Programme\\Heroes3 + Heroes3HotA\\Heroes 3 - HotA\\*.*";
+const char* BaseFolderPath2 = "F:\\Programme\\Heroes3 + Heroes3HotA\\Heroes 3 - HotA\\*.*";//test this server by sending this
 
 
-char* CreateFileUpdatePackage(int* bufferPosition, FileToDistribute* server_files, int* filecount) {
+char* CreateFileUpdatePackage(int* bufferPosition, FileToDistribute** server_files, int* filecount) {
     char* package_buffer = malloc(BUFFER_SIZE);
     assert(package_buffer != NULL);
 
@@ -25,14 +25,19 @@ char* CreateFileUpdatePackage(int* bufferPosition, FileToDistribute* server_file
     }
 
     //we need to convert our list into an array to have simpler access
-    server_files = malloc(files.Count * sizeof(FileToDistribute));
+    
+    *server_files = malloc(files.Count * sizeof(FileToDistribute));
+    //FileToDistribute* server_files = fileReturnPointer
+
     assert(server_files != 0);
-    filecount = files.Count;
+    *filecount = files.Count;
 
     FileToDistribute* current_file = files.first;
-    for (int i = 0; i < filecount; i++) //convert list to array
+    for (int i = 0; i < *filecount; i++) //convert list to array
     {
-        memcpy(&server_files[i], current_file, sizeof(FileToDistribute));
+        FileToDistribute* second_element = (*server_files + i);
+        (* server_files + i)->fname_len = 65535;
+        memcpy((*server_files+i), current_file, sizeof(FileToDistribute));
         FileToDistribute* next = current_file->next;
         free(current_file);
         current_file = next;
@@ -41,13 +46,13 @@ char* CreateFileUpdatePackage(int* bufferPosition, FileToDistribute* server_file
     //write all files to a byte[] that we can instantly send over to anyone who wants a complete fililist
     for (int i = 0; i < files.Count; i++)
     {
-        printf("    %.*s \n", server_files[i].fname_len, (server_files[i].rel_path));// print NON terminated string with ".*"
+        printf("  %i  %.*s \n", (*server_files +i)->fname_len, (*server_files + i)->fname_len, (*server_files + i)->rel_path);// print NON terminated string with ".*"
 
-        memcpy(&package_buffer[*bufferPosition], &(server_files[i].fname_len), 4);
+        memcpy(&package_buffer[*bufferPosition], &((*server_files + i)->fname_len), 4);
         *bufferPosition += 4; //write how many character
-        memcpy(&package_buffer[*bufferPosition], &(server_files[i].rel_path[0]), server_files[i].fname_len);
-        *bufferPosition += server_files[i].fname_len;//write the characters        
-        memcpy(&package_buffer[*bufferPosition], &(server_files[i].creation_time), 8);
+        memcpy(&package_buffer[*bufferPosition], ((*server_files + i)->rel_path), (*server_files + i)->fname_len);
+        *bufferPosition += (*server_files + i)->fname_len;//write the characters        
+        memcpy(&package_buffer[*bufferPosition], &((*server_files + i)->creation_time), 8);
         *bufferPosition += 8;//write the creationTime, this is for version control on the client side
     }
     package_buffer[*bufferPosition] = '\0';

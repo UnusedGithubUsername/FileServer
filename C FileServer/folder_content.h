@@ -25,6 +25,6 @@ typedef struct FileList { //for counting files in the folders at startup
 
 void GetFilesInFolder(FileList* FileList, char* BasePath);
 
-char* CreateFileUpdatePackage(int* bufferPosition, FileToDistribute* server_files, int* filecount);
+char* CreateFileUpdatePackage(int* bufferPosition, FileToDistribute** server_files, int* filecount);
 
 #endif
