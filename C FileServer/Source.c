@@ -9,6 +9,7 @@
 #pragma comment(lib, "winmm.lib") //for timers that dont sleep() and block a thread
 
 #define PORT 16502
+#define BUFFER_SIZE 65536
 #define MAX_CLIENTS 30 
 #define UPDATE_PERIOD 10//in milliseconds
 #define MAX_BYTECOUNT_PER_PERIOD (12500*UPDATE_PERIOD)//how many bytes can i send per update()? I have a 100mbit internet connection
@@ -22,6 +23,12 @@ typedef union {
         int file_guid;//  
         char file_data[BUFFER_SIZE - 12];
     } fileDataPacket;
+    struct {
+        int package_type;
+        int package_size;
+        int num_of_filerequests;
+        char fileIDs[BUFFER_SIZE - 12];
+    }file_requests;
     char data[BUFFER_SIZE];
 } DataUnion;
 
@@ -33,48 +40,33 @@ typedef struct { //we keep an array of those structs global
     char* filebytes;
     char stream_isActive;
 
-    int* fileIDs_requested;
+    short* fileIDs_requested;
     int current_fileindex_in_fileIDs_requested;
     int f_count;
 }ActivelySentFile;
 
 //functions
-void BindSocket(SOCKET* socket);
+SOCKET BindSocket();
 void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 void DisconnectClient(int index_of_socket, int errorVal);
-int HandleClientReq(SOCKET skt, int index, int index_of_socket, int file_updatepackage_length, char* current_file_update);
+int HandleClientReq(SOCKET skt, int index_of_socket, int file_updatepackage_length, char* current_file_update, ActivelySentFile* file_data);
+void DeclareSenderThread();
 
 DataUnion buffer;
-int filecount = 0;
+int filecount;
 FileToDistribute* server_files;
-HANDLE hMutex; 
+HANDLE hMutex;
 SOCKET client_sockets[MAX_CLIENTS] = { 0 };
-ActivelySentFile files_currently_sent[MAX_CLIENTS] = { 0 }; 
+ActivelySentFile files_currently_sent[MAX_CLIENTS] = { 0 };
 int id_counter = 1; //a guid, so that the client notices when the file he recieves switches
 
 int main() {
-    // Create a socket
-    SOCKET server_socket;
-    BindSocket(&server_socket);
 
     int file_updatepackage_length;
-    char* current_file_update = CreateFileUpdatePackage(&file_updatepackage_length, &server_files, &filecount);
-
-    //server_files = (FileToDistribute*)server_filesAdress;
-    //now declare a different thread that sends long files over time
-    TIMECAPS timeCaps;
-    UINT resolution = 1; // 1 ms resolution
-    timeGetDevCaps(&timeCaps, sizeof(TIMECAPS));
-    if (resolution < timeCaps.wPeriodMin) {
-        resolution = timeCaps.wPeriodMin;
-    }
-
-    hMutex = CreateMutex(NULL, FALSE, NULL);
-    assert(hMutex != NULL);
-    timeBeginPeriod(resolution);
-
-    // Set up a multimedia timer
-    timeSetEvent(UPDATE_PERIOD, 0, SendFiles, 0, TIME_PERIODIC);
+    char current_file_update[BUFFER_SIZE];
+    filecount = CreateFileUpdatePackage(&file_updatepackage_length, &server_files, &current_file_update); 
+    SOCKET server_socket = BindSocket();    // Create a socket  
+    DeclareSenderThread();    //now declare a different thread that sends long files over time 
 
     int connection_count = 0;
     while (1) {
@@ -135,7 +127,7 @@ int main() {
                 }
             }
 
-            int errorVal = HandleClientReq(skt, index_of_socket, file_updatepackage_length, filecount, current_file_update);
+            int errorVal = HandleClientReq(skt, file_updatepackage_length, filecount, current_file_update, &(files_currently_sent[index_of_socket]));
             if (errorVal != 0)
                 DisconnectClient(index_of_socket, errorVal);
         }
@@ -143,42 +135,43 @@ int main() {
     return 0;
 }
 
-int HandleClientReq(SOCKET skt, int i, int file_updatepackage_length, int filecount, char* current_file_update) {
-    //TODO rename sending data buffer after closing debugger. pls dont forget in 2 seconds
-    //TODO. CHECK IF WE HAVE ENOUGH DATA TO RECIEVE BEFORE RECIEVING IT !!!!: OTHERWISAE BIG BUGS
-    int valread = recv(skt, &buffer, BUFFER_SIZE, MSG_PEEK);// valread says how much data was recieved 
-    if (valread < 4) //valread 0 is dc, valread -1 is an error // we never need to handle a "too much data error" because this server only expects requests to retrieve files. Errors need to instantly disconnect
+int HandleClientReq(SOCKET skt, int syncP_size, int filecount, char* sync_package, ActivelySentFile* file_data) {
+
+    int available_bytes = recv(skt, &buffer, BUFFER_SIZE, MSG_PEEK);// valread says how much data was recieved 
+    if (available_bytes < 4) //valread 0 is dc, valread -1 is an error // we never need to handle a "too much data error" because this server only expects requests to retrieve files. Errors need to instantly disconnect
         return 1; //normal disconnect
 
-    int packageType;
-    memcpy(&packageType, &buffer, 4);
-    int bytecount_package;
 
-    switch (packageType)
+    switch (buffer.file_requests.package_type)
     {
     case(1)://client requests a file updatePackage so he can check if his data is up to date 
         recv(skt, &buffer, BUFFER_SIZE, 0); //discard the buffer
-        send(skt, current_file_update, file_updatepackage_length, 0);
+        send(skt, sync_package, syncP_size, 0);
         return 0;
 
-    case(2)://client requests a certain number of files  
-        memcpy(&bytecount_package, &buffer.data[4], 4);
-        if (valread < bytecount_package)//if not all the data was recieved by the server
+    case(2)://client requests a certain number of files   
+        if (available_bytes < buffer.file_requests.package_size)//if not all the data was recieved by the server
             return 0; //return until later so that all data may arrive
 
-        valread = recv(skt, &buffer, BUFFER_SIZE, 0); //recieve data from the kernels network buffer into the Buffer.  
-        memcpy(&files_currently_sent[i].f_count, &buffer.data[8], 4); // read the requested filecount
+        recv(skt, &buffer, BUFFER_SIZE, 0); //recieve data from the kernels network buffer into the Buffer.  
 
-        if (files_currently_sent[i].f_count > filecount || filecount <= 0)
+        if (buffer.file_requests.num_of_filerequests > filecount || buffer.file_requests.num_of_filerequests <= 0)
             return 2; //invalid filecount
 
-        files_currently_sent[i].fileIDs_requested = malloc(files_currently_sent[i].f_count * sizeof(int));
-        assert(files_currently_sent[i].fileIDs_requested != NULL);
-        memcpy(files_currently_sent[i].fileIDs_requested, &buffer.data[12], files_currently_sent[i].f_count * 4);
+        (*file_data).f_count = buffer.file_requests.num_of_filerequests;
+        printf("client requests %i files: ", (*file_data).f_count);
+        (*file_data).fileIDs_requested = malloc((*file_data).f_count * sizeof(short));
 
-        for (int j = 0; j < files_currently_sent[i].f_count; j++) //check requested files
+        assert((*file_data).fileIDs_requested != NULL);
+        memcpy((*file_data).fileIDs_requested, &buffer.file_requests.fileIDs[0], (*file_data).f_count * 2);
+        for (int i = 0; i < (*file_data).f_count; i++)
         {
-            if (files_currently_sent[i].fileIDs_requested[j] > filecount || files_currently_sent[i].fileIDs_requested[j] < 0)
+            printf(" %hd ", (*file_data).fileIDs_requested[i]);
+        }
+        printf("\n");
+        for (int j = 0; j < (*file_data).f_count; j++) //check requested files
+        {
+            if ((*file_data).fileIDs_requested[j] > filecount || (*file_data).fileIDs_requested[j] < 0)
                 return 3; //invalid fileID
         }
         return 0;
@@ -204,7 +197,7 @@ void DisconnectClient(int index_of_socket, int errorVal)//Free the memory relate
     {
         free(files_currently_sent[index_of_socket].filebytes);
         files_currently_sent[index_of_socket].stream_isActive = 0;
-    } 
+    }
 }
 
 void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2) {
@@ -232,9 +225,9 @@ void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw
             {// we need to send a header
                 int f_index = files_currently_sent[i].fileIDs_requested[files_currently_sent[i].current_fileindex_in_fileIDs_requested];
 
-                char full_path[200] = { 0 };// combine the path parts into the full filepath
-                memcpy(&full_path[0], BaseFolderPath, strlen(BaseFolderPath) - 3);//network that for the header file
-                memcpy(&full_path[strlen(BaseFolderPath) - 3], server_files[f_index].rel_path, server_files[f_index].fname_len);
+                WCHAR full_path[200] = { 0 };// combine the path parts into the full filepath
+                memcpy(&full_path[0], BaseFolderPathW, (wcslen(BaseFolderPathW) - 3) * 2);//network that for the header file
+                memcpy(&full_path[wcslen(BaseFolderPathW) - 3], server_files[f_index].rel_path, server_files[f_index].byte_count);
 
                 files_currently_sent[i].filebytes = malloc(server_files[f_index].fsize); //create a buffer to hold the file in memory
                 assert(files_currently_sent[i].filebytes != NULL);
@@ -243,10 +236,11 @@ void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw
                 files_currently_sent[i].bytes_sent = 0;
                 files_currently_sent[i].packages_send = 0;
 
-                printf("sending file: %s \n ", full_path);
+                wprintf(L"sending file: %ls \n ", full_path);
 
                 FILE* file;
-                errno_t errorval = fopen_s(&file, full_path, "rb"); //r means read with newline translations. rb stands for read(binary)
+
+                errno_t errorval = _wfopen_s(&file, full_path, L"rb"); //r means read with newline translations. rb stands for read(binary)
                 assert(file != NULL);
                 int filebytes_read = fread(&files_currently_sent[i].filebytes[0], 1, server_files[f_index].fsize, file);
                 fclose(file);
@@ -256,13 +250,13 @@ void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw
                 id_counter++;//if we always count up, we never reuse a fileID
 
                 //filenameLen
-                int fNLen = server_files[f_index].fname_len;
+                int fNLen = server_files[f_index].byte_count;
                 memcpy(&buffer.fileDataPacket.file_data[buffer_position], &fNLen, 4);
                 buffer_position += 4;
 
                 //filename
-                memcpy(&buffer.fileDataPacket.file_data[buffer_position], &(server_files[f_index].rel_path[0]), server_files[f_index].fname_len);
-                buffer_position += server_files[f_index].fname_len;
+                memcpy(&buffer.fileDataPacket.file_data[buffer_position], &(server_files[f_index].rel_path[0]), server_files[f_index].byte_count);
+                buffer_position += server_files[f_index].byte_count;
 
                 //filesize
                 memcpy(&buffer.fileDataPacket.file_data[buffer_position], &(server_files[f_index].fsize), 4);
@@ -314,16 +308,16 @@ void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw
     ReleaseMutex(hMutex);
 }
 
-void BindSocket(SOCKET* server_socket) {
-
+SOCKET BindSocket() {
+    SOCKET server_socket;
     WSADATA wsa; //Write return data to this value,  //latest version is 2.2, so request to use that version of sockets
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         printf("Failed to start Server");
-        return;
+        exit(-1);
     }
 
-    *server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (*server_socket == INVALID_SOCKET) {
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket == INVALID_SOCKET) {
         printf("Could not create socket : %d", WSAGetLastError());
     }
     struct sockaddr_in server;
@@ -331,13 +325,28 @@ void BindSocket(SOCKET* server_socket) {
     server.sin_addr.s_addr = INADDR_ANY;
     server.sin_port = htons(PORT);
 
-    if (bind(*server_socket, (struct sockaddr*)&server, sizeof(server)) == SOCKET_ERROR) {
+    if (bind(server_socket, (struct sockaddr*)&server, sizeof(server)) == SOCKET_ERROR) {
         printf("Bind failed with error code : %d", WSAGetLastError());
         exit(EXIT_FAILURE);
     }
 
-    if (listen(*server_socket, 32) == SOCKET_ERROR) { //32 means 32 incoming connectins can queue up
+    if (listen(server_socket, 32) == SOCKET_ERROR) { //32 means 32 incoming connectins can queue up
         printf("Listen failed with error code : %d", WSAGetLastError());
         exit(EXIT_FAILURE);
     }
+
+    return server_socket;
+}
+
+void DeclareSenderThread() { 
+
+    TIMECAPS timeCaps;
+    hMutex = CreateMutex(NULL, FALSE, NULL);
+    UINT resolution = 1; // 1 ms resolution
+    timeGetDevCaps(&timeCaps, sizeof(TIMECAPS));
+    if (resolution < timeCaps.wPeriodMin)
+        resolution = timeCaps.wPeriodMin;
+
+    timeBeginPeriod(resolution);
+    timeSetEvent(UPDATE_PERIOD, 0, SendFiles, 0, TIME_PERIODIC);// Set up a multimedia timer
 }

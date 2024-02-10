@@ -1,19 +1,15 @@
 #ifndef getFolderContent
 #define getFolderContent
-
-
-#define BUFFER_SIZE 65536
-
-
-//global variables
-
-extern const char* BaseFolderPath; 
+ 
+ 
+extern const WCHAR* BaseFolderPathW;
 
 typedef struct FileToDistribute {
-    char* rel_path;
-    int fname_len;
+    WCHAR* rel_path;
+    int byte_count;
     UINT64 creation_time;
     ULONGLONG fsize;
+    HANDLE handle;
     struct FileToDistribute* next;
 } FileToDistribute;
 
@@ -23,8 +19,8 @@ typedef struct FileList { //for counting files in the folders at startup
     int Count;
 }FileList;
 
-void GetFilesInFolder(FileList* FileList, char* BasePath);
+void GetFilesInFolder(FileList* FileList, WCHAR* BasePath);
 
-char* CreateFileUpdatePackage(int* bufferPosition, FileToDistribute** server_files, int* filecount);
+int CreateFileUpdatePackage(int* bufferPosition, FileToDistribute** server_files, char* package_buffer);
 
 #endif
