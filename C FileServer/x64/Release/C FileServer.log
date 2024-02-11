@@ -1,13 +1,12 @@
 ﻿  Source.c
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(67,104): warning C4047: 'function': 'char *' differs in levels of indirection from 'char (*)[65536]'
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(67,84): warning C4024: 'CreateFileUpdatePackage': different types for formal and actual parameter 3
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(140,44): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(148,26): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(156,26): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(235,78): warning C4244: '=': conversion from 'ULONGLONG' to 'int', possible loss of data
-C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(245,43): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(66,104): warning C4047: 'function': 'char *' differs in levels of indirection from 'char (*)[65536]'
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(66,84): warning C4024: 'CreateFileUpdatePackage': different types for formal and actual parameter 3
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(152,44): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(160,26): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(180,26): warning C4133: 'function': incompatible types - from 'DataUnion *' to 'char *'
+C:\Users\Klauke\source\repos\C FileServer\C FileServer\Source.c(235,74): warning C4244: '=': conversion from 'ULONGLONG' to 'int', possible loss of data
   Generating code
-  3 of 13 functions (23.1%) were compiled, the rest were copied from previous compilation.
+  2 of 12 functions (16.7%) were compiled, the rest were copied from previous compilation.
     0 functions were new in current compilation
     0 functions had inline decision re-evaluated but remain unchanged
   Finished generating code

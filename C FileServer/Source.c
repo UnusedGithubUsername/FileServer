@@ -27,8 +27,8 @@ typedef union {
         int package_type;
         int package_size;
         int num_of_filerequests;
-        char fileIDs[BUFFER_SIZE - 12];
-    }file_requests;
+        WCHAR fileIDs[(BUFFER_SIZE - 12)/2];//12 bytes other data, and wchar is 2 bytes long
+    }request;
     char data[BUFFER_SIZE];
 } DataUnion;
 
@@ -41,7 +41,7 @@ typedef struct { //we keep an array of those structs global
     char stream_isActive;
 
     short* fileIDs_requested;
-    int current_fileindex_in_fileIDs_requested;
+    int request_index;
     int f_count;
 }ActivelySentFile;
 
@@ -50,7 +50,6 @@ SOCKET BindSocket();
 void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 void DisconnectClient(int index_of_socket, int errorVal);
 int HandleClientReq(SOCKET skt, int index_of_socket, int file_updatepackage_length, char* current_file_update, ActivelySentFile* file_data);
-void DeclareSenderThread();
 
 DataUnion buffer;
 int filecount;
@@ -64,9 +63,16 @@ int main() {
 
     int file_updatepackage_length;
     char current_file_update[BUFFER_SIZE];
-    filecount = CreateFileUpdatePackage(&file_updatepackage_length, &server_files, &current_file_update); 
+    filecount = CreateFileUpdatePackage(&file_updatepackage_length, &server_files, &current_file_update);
     SOCKET server_socket = BindSocket();    // Create a socket  
-    DeclareSenderThread();    //now declare a different thread that sends long files over time 
+    hMutex = CreateMutexW(NULL, FALSE, NULL);
+    timeBeginPeriod(1);
+    timeSetEvent(UPDATE_PERIOD, 0, SendFiles, 0, TIME_PERIODIC);// Set up a multimedia timer
+
+    for (size_t i = 0; i < MAX_CLIENTS; i++)
+    {
+        files_currently_sent[i].fileIDs_requested = malloc(sizeof(short) * filecount); //allocate filerequests
+    }
 
     int connection_count = 0;
     while (1) {
@@ -74,8 +80,14 @@ int main() {
         for (int i = 0; i < connection_count; i++)//clear empty positions, concentrate the array
         {
             if (client_sockets[i] < 1) {
+
                 client_sockets[i] = client_sockets[connection_count - 1];//condense the array
                 client_sockets[connection_count - 1] = 0;//set it to zero for debugging purporse. should never matter though
+
+                ActivelySentFile temp = files_currently_sent[i];
+                files_currently_sent[i] = files_currently_sent[connection_count - 1];
+                files_currently_sent[connection_count - 1] = temp;
+
                 connection_count--;
                 i--;//we need to check the new value again
             }
@@ -139,60 +151,51 @@ int HandleClientReq(SOCKET skt, int syncP_size, int filecount, char* sync_packag
 
     int available_bytes = recv(skt, &buffer, BUFFER_SIZE, MSG_PEEK);// valread says how much data was recieved 
     if (available_bytes < 4) //valread 0 is dc, valread -1 is an error // we never need to handle a "too much data error" because this server only expects requests to retrieve files. Errors need to instantly disconnect
-        return 1; //normal disconnect
+        return 1; //normal disconnect or error, both are fine
 
 
-    switch (buffer.file_requests.package_type)
+    switch (buffer.request.package_type)
     {
     case(1)://client requests a file updatePackage so he can check if his data is up to date 
-        recv(skt, &buffer, BUFFER_SIZE, 0); //discard the buffer
+        recv(skt, &buffer, BUFFER_SIZE, 0); //clear the systems buffer by reading without MSG_PEEK. 
         send(skt, sync_package, syncP_size, 0);
         return 0;
 
     case(2)://client requests a certain number of files   
-        if (available_bytes < buffer.file_requests.package_size)//if not all the data was recieved by the server
-            return 0; //return until later so that all data may arrive
+        if (available_bytes < buffer.request.package_size)//if not all the data was recieved by the server
+            return 0; //all is fine, but data has not fully arrived. return until later so that all data may arrive 
 
-        recv(skt, &buffer, BUFFER_SIZE, 0); //recieve data from the kernels network buffer into the Buffer.  
+        if (buffer.request.num_of_filerequests > filecount || buffer.request.num_of_filerequests <= 0)
+            return 2; //error: invalid filecount
 
-        if (buffer.file_requests.num_of_filerequests > filecount || buffer.file_requests.num_of_filerequests <= 0)
-            return 2; //invalid filecount
+        if (available_bytes < 12 + (2 * buffer.request.num_of_filerequests))
+            return 3;//not enough fileIDs were sent
 
-        (*file_data).f_count = buffer.file_requests.num_of_filerequests;
-        printf("client requests %i files: ", (*file_data).f_count);
-        (*file_data).fileIDs_requested = malloc((*file_data).f_count * sizeof(short));
-
-        assert((*file_data).fileIDs_requested != NULL);
-        memcpy((*file_data).fileIDs_requested, &buffer.file_requests.fileIDs[0], (*file_data).f_count * 2);
-        for (int i = 0; i < (*file_data).f_count; i++)
+        for (int i = 0; i < buffer.request.num_of_filerequests; i++) //check requested files
         {
-            printf(" %hd ", (*file_data).fileIDs_requested[i]);
+            if (buffer.request.fileIDs[i] > filecount || buffer.request.fileIDs[i] < 0)
+                return 4; //error: invalid fileID
         }
-        printf("\n");
-        for (int j = 0; j < (*file_data).f_count; j++) //check requested files
-        {
-            if ((*file_data).fileIDs_requested[j] > filecount || (*file_data).fileIDs_requested[j] < 0)
-                return 3; //invalid fileID
-        }
-        return 0;
+
+        recv(skt, &buffer, BUFFER_SIZE, 0); //clear the systems buffer by reading without MSG_PEEK.   
+        printf("client requests %i files: ", buffer.request.num_of_filerequests);
+
+        (*file_data).f_count = buffer.request.num_of_filerequests; //save num of requested files
+        memcpy((*file_data).fileIDs_requested, &buffer.request.fileIDs[0], (*file_data).f_count * 2); //save requested files 
+        return 0; //all is fine
     }
-    return 4; // unknown packet type, (switchcase didnt catch any case)
+    return 5; // error: unknown packet type, (switchcase didnt catch any case)
 }
 
 void DisconnectClient(int index_of_socket, int errorVal)//Free the memory related to the client (outstanding files) and reset some things
 {
     printf("Client disconnected with errorVal %i,  (1 = good, 2+ = problem)\n", errorVal);
     closesocket(client_sockets[index_of_socket]);
-    files_currently_sent[index_of_socket].f_count = 0;
-    files_currently_sent[index_of_socket].current_fileindex_in_fileIDs_requested = 0;
-
-    if (files_currently_sent[index_of_socket].fileIDs_requested != NULL) //free the File_ids[] pointer and set it to 0
-    {
-        free(files_currently_sent[index_of_socket].fileIDs_requested);
-        files_currently_sent[index_of_socket].fileIDs_requested = NULL;
-    }
-
     client_sockets[index_of_socket] = 0;// mark socket spot as unused
+
+    files_currently_sent[index_of_socket].f_count = 0;
+    files_currently_sent[index_of_socket].request_index = 0; 
+
     if (files_currently_sent[index_of_socket].stream_isActive)//if a file is currently mid sending, free the file
     {
         free(files_currently_sent[index_of_socket].filebytes);
@@ -209,102 +212,87 @@ void _stdcall SendFiles(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser, DWORD_PTR dw
     //before the data there is NumOfPacketsSent, fileGuid, firstPackageHeader (maybe), data
     //stuff like the name does not have to be sent, because that is inside the data
     int bytes_sent_this_Cycle = 0;
-    bool files_remaining = false;
 
-    do {
-        for (size_t i = 0; i < MAX_CLIENTS; i++)
-        {
-            if ((bytes_sent_this_Cycle / MAX_BYTECOUNT_PER_PERIOD) > 0.9f)
-                break;
+    for (size_t i = 0; i < MAX_CLIENTS; i++)
+    {
+        if ((bytes_sent_this_Cycle / MAX_BYTECOUNT_PER_PERIOD) > 0.9f)
+            break;
 
-            if (client_sockets[i] == 0 || files_currently_sent[i].f_count <= files_currently_sent[i].current_fileindex_in_fileIDs_requested) //if no reciever or nothing to be recieved
-                continue;
+        if (client_sockets[i] == 0 || files_currently_sent[i].f_count <= files_currently_sent[i].request_index) //if no reciever or nothing to be recieved
+            continue;
 
-            int buffer_position = 0;
-            if (files_currently_sent[i].stream_isActive == 0)
-            {// we need to send a header
-                int f_index = files_currently_sent[i].fileIDs_requested[files_currently_sent[i].current_fileindex_in_fileIDs_requested];
+        int buffer_position = 0;
+        if (files_currently_sent[i].stream_isActive == 0)
+        {// we need to send a header
+            int f_index = files_currently_sent[i].fileIDs_requested[files_currently_sent[i].request_index];
 
-                WCHAR full_path[200] = { 0 };// combine the path parts into the full filepath
-                memcpy(&full_path[0], BaseFolderPathW, (wcslen(BaseFolderPathW) - 3) * 2);//network that for the header file
-                memcpy(&full_path[wcslen(BaseFolderPathW) - 3], server_files[f_index].rel_path, server_files[f_index].byte_count);
+            WCHAR full_path[200] = { 0 };// combine the path parts into the full filepath
+            memcpy(&full_path[0], BaseFolderPathW, (wcslen(BaseFolderPathW) - 3) * 2);//network that for the header file
+            memcpy(&full_path[wcslen(BaseFolderPathW) - 3], server_files[f_index].rel_path, server_files[f_index].byte_count);
 
-                files_currently_sent[i].filebytes = malloc(server_files[f_index].fsize); //create a buffer to hold the file in memory
-                assert(files_currently_sent[i].filebytes != NULL);
-                files_currently_sent[i].stream_isActive = 1;
-                files_currently_sent[i].filebytes_len = server_files[f_index].fsize;
-                files_currently_sent[i].bytes_sent = 0;
-                files_currently_sent[i].packages_send = 0;
+            files_currently_sent[i].filebytes = malloc(server_files[f_index].fsize); //create a buffer to hold the file in memory
+            files_currently_sent[i].stream_isActive = 1;
+            files_currently_sent[i].filebytes_len = server_files[f_index].fsize;
+            files_currently_sent[i].bytes_sent = 0;
+            files_currently_sent[i].packages_send = 0;
 
-                wprintf(L"sending file: %ls \n ", full_path);
+            wprintf(L"sending file: %ls \n ", full_path);
 
-                FILE* file;
+            FILE* file; 
+            errno_t errorval = _wfopen_s(&file, full_path, L"rb"); //r means read with newline translations. rb stands for read(binary)
+            fread(&files_currently_sent[i].filebytes[0], 1, server_files[f_index].fsize, file);
+            fclose(file);
 
-                errno_t errorval = _wfopen_s(&file, full_path, L"rb"); //r means read with newline translations. rb stands for read(binary)
-                assert(file != NULL);
-                int filebytes_read = fread(&files_currently_sent[i].filebytes[0], 1, server_files[f_index].fsize, file);
-                fclose(file);
+            //Create a header
+            files_currently_sent[i].file_id = id_counter;
+            id_counter++;//if we always count up, we never reuse a fileID
 
-                //Create a header
-                files_currently_sent[i].file_id = id_counter;
-                id_counter++;//if we always count up, we never reuse a fileID
+            //filenameLen
+            int fNLen = server_files[f_index].byte_count;
+            memcpy(&buffer.fileDataPacket.file_data[buffer_position], &fNLen, 4);
+            buffer_position += 4;
 
-                //filenameLen
-                int fNLen = server_files[f_index].byte_count;
-                memcpy(&buffer.fileDataPacket.file_data[buffer_position], &fNLen, 4);
-                buffer_position += 4;
+            //filename
+            memcpy(&buffer.fileDataPacket.file_data[buffer_position], &(server_files[f_index].rel_path[0]), server_files[f_index].byte_count);
+            buffer_position += server_files[f_index].byte_count;
 
-                //filename
-                memcpy(&buffer.fileDataPacket.file_data[buffer_position], &(server_files[f_index].rel_path[0]), server_files[f_index].byte_count);
-                buffer_position += server_files[f_index].byte_count;
+            //filesize
+            memcpy(&buffer.fileDataPacket.file_data[buffer_position], &(server_files[f_index].fsize), 4);
+            buffer_position += 4;
 
-                //filesize
-                memcpy(&buffer.fileDataPacket.file_data[buffer_position], &(server_files[f_index].fsize), 4);
-                buffer_position += 4;
-
-                //fileCreatingTime (long)
-                memcpy(&buffer.fileDataPacket.file_data[buffer_position], &(server_files[f_index].creation_time), 8);
-                buffer_position += 8;
-            }
-
-            int MAX_BYTECOUNT = 65536 - 12 - buffer_position; // TODO, say where this synce, and maybe update this
-
-            //TODO, dont send entire file, only send part, filebytes_len needs replacement
-            int bytes_left = files_currently_sent[i].filebytes_len - files_currently_sent[i].bytes_sent;
-            int bytecount_we_send_this_client = MAX_BYTECOUNT < bytes_left ? MAX_BYTECOUNT : bytes_left; // send max number of bytes unless fewer are left to send
-
-            //now the actual data
-            memcpy(&buffer.fileDataPacket.file_data[buffer_position], &files_currently_sent[i].filebytes[files_currently_sent[i].bytes_sent], bytecount_we_send_this_client);
-            buffer_position += bytecount_we_send_this_client;
-
-            buffer.fileDataPacket.package_size = buffer_position - 4 + 12;// size not including the size int but including 3 fields
-            buffer.fileDataPacket.package_number = files_currently_sent[i].packages_send;
-            buffer.fileDataPacket.file_guid = files_currently_sent[i].file_id;
-
-            files_currently_sent[i].packages_send++;
-
-            send(client_sockets[i], buffer.data, buffer_position + 12, 0);//+16 so that we include the front 16 bytes (or rather dont cut out the last 16
-
-            files_currently_sent[i].bytes_sent += bytecount_we_send_this_client;
-            int filesend_finished = files_currently_sent[i].bytes_sent == files_currently_sent[i].filebytes_len;
-            if (filesend_finished)
-            {
-                files_currently_sent[i].current_fileindex_in_fileIDs_requested++;
-
-                free(files_currently_sent[0].filebytes);
-                files_currently_sent[0].stream_isActive = 0;
-
-            }
-            else //file is left unfinished
-            {
-                files_remaining = true;
-            }
-
-            bytes_sent_this_Cycle += bytecount_we_send_this_client;
-
+            //fileCreatingTime (long)
+            memcpy(&buffer.fileDataPacket.file_data[buffer_position], &(server_files[f_index].creation_time), 8);
+            buffer_position += 8;
         }
-    } while ((bytes_sent_this_Cycle / MAX_BYTECOUNT_PER_PERIOD) > 0.5f && files_remaining && false);
 
+        int MAX_BYTECOUNT = 65536 - 12 - buffer_position; // TODO, say where this synce, and maybe update this
+
+        //TODO, dont send entire file, only send part, filebytes_len needs replacement
+        int bytes_left = files_currently_sent[i].filebytes_len - files_currently_sent[i].bytes_sent;
+        int bytecount_we_send_this_client = MAX_BYTECOUNT < bytes_left ? MAX_BYTECOUNT : bytes_left; // send max number of bytes unless fewer are left to send
+
+        memcpy(&buffer.fileDataPacket.file_data[buffer_position], &files_currently_sent[i].filebytes[files_currently_sent[i].bytes_sent], bytecount_we_send_this_client);
+        buffer_position += bytecount_we_send_this_client;
+
+        buffer.fileDataPacket.package_size = buffer_position - 4 + 12;// size not including the size int but including 3 fields
+        buffer.fileDataPacket.package_number = files_currently_sent[i].packages_send;
+        buffer.fileDataPacket.file_guid = files_currently_sent[i].file_id;
+
+        files_currently_sent[i].packages_send++;
+
+        send(client_sockets[i], buffer.data, buffer_position + 12, 0);//+16 so that we include the front 16 bytes (or rather dont cut out the last 16
+
+        files_currently_sent[i].bytes_sent += bytecount_we_send_this_client;
+        int file_sent = files_currently_sent[i].bytes_sent == files_currently_sent[i].filebytes_len;
+        if (file_sent)
+        {
+            files_currently_sent[i].request_index++;
+            free(files_currently_sent[0].filebytes);
+            files_currently_sent[0].stream_isActive = 0;
+        }
+        bytes_sent_this_Cycle += bytecount_we_send_this_client;
+    }
+     
     ReleaseMutex(hMutex);
 }
 
@@ -336,17 +324,4 @@ SOCKET BindSocket() {
     }
 
     return server_socket;
-}
-
-void DeclareSenderThread() { 
-
-    TIMECAPS timeCaps;
-    hMutex = CreateMutex(NULL, FALSE, NULL);
-    UINT resolution = 1; // 1 ms resolution
-    timeGetDevCaps(&timeCaps, sizeof(TIMECAPS));
-    if (resolution < timeCaps.wPeriodMin)
-        resolution = timeCaps.wPeriodMin;
-
-    timeBeginPeriod(resolution);
-    timeSetEvent(UPDATE_PERIOD, 0, SendFiles, 0, TIME_PERIODIC);// Set up a multimedia timer
 }
